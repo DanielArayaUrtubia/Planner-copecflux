@@ -1,4 +1,4 @@
-const CACHE_NAME = "planner-copecflux-v1";
+const CACHE_NAME = "plans-copecflux-v2";
 const FILES_TO_CACHE = [
   "./index.html",
   "./manifest.json",

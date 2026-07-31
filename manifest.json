@@ -1,13 +1,13 @@
 {
-  "name": "Planner Copec Flux",
-  "short_name": "Copec Flux",
+  "name": "Plans Copec Flux",
+  "short_name": "Plans",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#1a1a1a",
-  "description": "Planner Copec Flux",
+  "description": "Plans Copec Flux",
   "icons": [
     {
       "src": "icon-192.png",
