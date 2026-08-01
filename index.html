@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Plans — Copec Flux</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1a1a1a">
@@ -29,7 +29,7 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
   --red-text:#b02020;--red-bg:#fde8e8;
   --sepia:#8B5E1A;--parchment:#c8a05a;
 }
-#app{display:flex;flex-direction:column;height:100vh;background:var(--bg0);overflow:hidden;color:var(--text1)}
+#app{display:flex;flex-direction:column;height:100vh;height:calc(var(--app-vh, 1vh) * 100);height:100dvh;background:var(--bg0);overflow:hidden;color:var(--text1)}
 #header{display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--bg0);border-bottom:1px solid var(--border);flex-shrink:0}
 
 #planner-wordmark{display:flex;align-items:baseline;gap:0;line-height:1;user-select:none}
@@ -73,8 +73,8 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
 #main{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0}
 #canvas-wrap{flex:1;position:relative;overflow:hidden;min-height:0}
 #bg-canvas,#draw-canvas{position:absolute;top:0;left:0;width:100%;height:100%}
-#draw-canvas{cursor:crosshair}
-#panel{width:auto;border-left:none;border-top:0.5px solid var(--border);background:var(--bg1);overflow-y:auto;display:flex;flex-direction:column;min-height:0;flex-shrink:0;max-height:36vh;transition:max-height .18s ease}
+#draw-canvas{cursor:crosshair;touch-action:none}
+#panel{width:auto;border-left:none;border-top:0.5px solid var(--border);background:var(--bg1);overflow-y:auto;display:flex;flex-direction:column;min-height:0;flex-shrink:0;max-height:36vh;transition:max-height .18s ease;padding-bottom:env(safe-area-inset-bottom, 0px)}
 #panel.collapsed{max-height:38px;overflow:hidden}
 #panel-head{padding:8px 12px;border-bottom:0.5px solid var(--border);font-size:12px;font-weight:500;color:var(--text1);flex-shrink:0;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--bg1);z-index:1}
 #panel-chevron{font-size:14px;color:var(--text3);transition:transform .18s ease}
@@ -231,6 +231,18 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
 </div>
 
 <script>
+// Altura visible real del celular (evita que la barra de gestos/nav tape
+// el panel inferior en navegadores que no soportan la unidad "dvh").
+function setAppVh(){
+  document.documentElement.style.setProperty('--app-vh', (window.innerHeight*0.01)+'px');
+}
+setAppVh();
+window.addEventListener('resize', setAppVh);
+window.addEventListener('orientationchange', setAppVh);
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', setAppVh);
+}
+
 // ══════════════════════════════════════════════════════════
 // LINE TYPES — each has a draw function used both on canvas
 // ══════════════════════════════════════════════════════════
@@ -767,7 +779,8 @@ function computeAutoScale(){
 }
 function pos(e){
   const r=drC.getBoundingClientRect();
-  return{x:e.clientX-r.left,y:e.clientY-r.top};
+  const t=(e.touches&&e.touches[0])||(e.changedTouches&&e.changedTouches[0])||e;
+  return{x:t.clientX-r.left,y:t.clientY-r.top};
 }
 
 function pointInPoly(p,pts){
@@ -779,17 +792,17 @@ function pointInPoly(p,pts){
   return inside;
 }
 function hitComp(p){for(let i=components.length-1;i>=0;i--){const c=components[i],w=c.w||60,h=c.h||60;if(Math.abs(p.x-c.x)<w/2&&Math.abs(p.y-c.y)<h/2)return c;}return null}
-function hitCompResize(p){const c=components.find(c=>c.id===selId);if(!c)return false;const w=c.w||60,h=c.h||60;return Math.hypot(p.x-(c.x+w/2),p.y-(c.y+h/2))<9}
-function hitLinePt(p){const l=lines.find(l=>l.id===selId);if(!l)return -1;for(let i=0;i<l.pts.length;i++){if(Math.hypot(p.x-l.pts[i].x,p.y-l.pts[i].y)<10)return i;}return -1}
-function hitZonePt(p){const z=zones.find(function(z){return z.id===selId;});if(!z)return -1;for(let i=0;i<z.pts.length;i++){if(Math.hypot(p.x-z.pts[i].x,p.y-z.pts[i].y)<10)return i;}return -1}
-function hitObstPt(p){const o=obstructions.find(function(o){return o.id===selId;});if(!o)return -1;for(let i=0;i<o.pts.length;i++){if(Math.hypot(p.x-o.pts[i].x,p.y-o.pts[i].y)<10)return i;}return -1}
+function hitCompResize(p){const c=components.find(c=>c.id===selId);if(!c)return false;const w=c.w||60,h=c.h||60;return Math.hypot(p.x-(c.x+w/2),p.y-(c.y+h/2))<16}
+function hitLinePt(p){const l=lines.find(l=>l.id===selId);if(!l)return -1;for(let i=0;i<l.pts.length;i++){if(Math.hypot(p.x-l.pts[i].x,p.y-l.pts[i].y)<16)return i;}return -1}
+function hitZonePt(p){const z=zones.find(function(z){return z.id===selId;});if(!z)return -1;for(let i=0;i<z.pts.length;i++){if(Math.hypot(p.x-z.pts[i].x,p.y-z.pts[i].y)<16)return i;}return -1}
+function hitObstPt(p){const o=obstructions.find(function(o){return o.id===selId;});if(!o)return -1;for(let i=0;i<o.pts.length;i++){if(Math.hypot(p.x-o.pts[i].x,p.y-o.pts[i].y)<16)return i;}return -1}
 function hitLine(p){let best=null,bestD=12;lines.forEach(l=>{for(let i=1;i<l.pts.length;i++){const d=d2seg(p,l.pts[i-1],l.pts[i]);if(d<bestD){bestD=d;best=l.id}}});return best}
 function d2seg(p,a,b){const dx=b.x-a.x,dy=b.y-a.y;if(!dx&&!dy)return Math.hypot(p.x-a.x,p.y-a.y);const t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy)));return Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)}
 
 // ══════════════════════════════════════════════════════════
 // EVENTS
 // ══════════════════════════════════════════════════════════
-drC.addEventListener('mousemove',e=>{
+function cMove(e){
   const p=pos(e);
   if(resizingComp&&resizeStart){
     const dx=p.x-resizeStart.x,dy=p.y-resizeStart.y;
@@ -836,7 +849,34 @@ drC.addEventListener('mousemove',e=>{
     else if(hitLine(p))drC.style.cursor='pointer';
     else drC.style.cursor='default';
   }
-});
+}
+drC.addEventListener('mousemove',cMove);
+
+// ── Soporte táctil: arrastrar puntos, mover/redimensionar componentes ──
+// Sin esto, en el celular solo se registraban toques cortos (como clics),
+// pero no se podía "deslizar" para mover vértices, líneas ni componentes.
+let _lastTapTime=0, _lastTapPos=null;
+drC.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  cDown(e);
+},{passive:false});
+drC.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  cMove(e);
+},{passive:false});
+drC.addEventListener('touchend',e=>{
+  e.preventDefault();
+  cUp(e);
+  // Doble-toque rápido en el mismo punto = doble clic (cierra polilínea/zona/obstrucción)
+  const p=pos(e);
+  const now=Date.now();
+  if(_lastTapPos && (now-_lastTapTime)<350 && Math.hypot(p.x-_lastTapPos.x,p.y-_lastTapPos.y)<24){
+    cDbl(e);
+    _lastTapTime=0;_lastTapPos=null;
+  } else {
+    _lastTapTime=now;_lastTapPos=p;
+  }
+},{passive:false});
 
 function cDown(e){
   closeAllDds();
@@ -854,8 +894,8 @@ function cDown(e){
     // Slope: drag p1/p2
     var selSlope=slopes.find(function(s){return s.id===selId;});
     if(selSlope){
-      if(Math.hypot(p.x-selSlope.p1.x,p.y-selSlope.p1.y)<10){editDragPt={slopeId:selId,ptKey:'p1'};return;}
-      if(Math.hypot(p.x-selSlope.p2.x,p.y-selSlope.p2.y)<10){editDragPt={slopeId:selId,ptKey:'p2'};return;}
+      if(Math.hypot(p.x-selSlope.p1.x,p.y-selSlope.p1.y)<16){editDragPt={slopeId:selId,ptKey:'p1'};return;}
+      if(Math.hypot(p.x-selSlope.p2.x,p.y-selSlope.p2.y)<16){editDragPt={slopeId:selId,ptKey:'p2'};return;}
     }
     // Zone: drag a vertex
     var zPtIdx=hitZonePt(p);
@@ -1034,20 +1074,25 @@ document.getElementById('toolbar').addEventListener('scroll',()=>{document.getEl
 async function processImageFile(file){
   if(!file) return;
   const looksLikeImage = file.type && file.type.startsWith('image/');
-  const looksLikeHeic = /\.(heic|heif)$/i.test(file.name||'');
-  if(!looksLikeImage && !looksLikeHeic){ showStatus('El archivo no es una imagen'); return; }
+  const isHeic = /\.(heic|heif)$/i.test(file.name||'') || /heic|heif/i.test(file.type||'');
+  if(!looksLikeImage && !isHeic){ showStatus('El archivo no es una imagen'); return; }
   showStatus('Cargando imagen…', 10000);
   try{
     let srcW, srcH, drawSource;
-    // createImageBitmap decodifica fotos de cámara (alta resolución) de forma
-    // más eficiente en memoria que FileReader+<img>, y con imageOrientation
-    // corrige la rotación EXIF que traen las fotos tomadas con la cámara.
+    // createImageBitmap con resizeWidth decodifica la foto YA reducida,
+    // sin cargar en memoria la imagen completa (algunas cámaras toman
+    // fotos de 50+ megapíxeles, y decodificarlas enteras puede fallar
+    // por falta de memoria). También corrige la rotación EXIF.
     if('createImageBitmap' in window){
-      try{
-        drawSource = await createImageBitmap(file, {imageOrientation:'from-image'});
-      }catch(errA){
-        try{ drawSource = await createImageBitmap(file); }
-        catch(errB){ drawSource = null; }
+      const attempts = [
+        {imageOrientation:'from-image', resizeWidth:2200, resizeQuality:'high'},
+        {resizeWidth:2200, resizeQuality:'high'},
+        {imageOrientation:'from-image'},
+        {}
+      ];
+      for(const opts of attempts){
+        try{ drawSource = await createImageBitmap(file, opts); break; }
+        catch(err){ drawSource = null; }
       }
       if(drawSource){ srcW=drawSource.width; srcH=drawSource.height; }
     }
@@ -1066,9 +1111,8 @@ async function processImageFile(file){
       });
       srcW=img.naturalWidth; srcH=img.naturalHeight; drawSource=img;
     }
-    // Las fotos de cámara suelen venir en resoluciones muy altas (12+ MP);
-    // las reducimos a un máximo razonable para que carguen rápido y no
-    // se queden pegadas por memoria, sobre todo dentro de la APK.
+    // Por si acaso el decodificador ya entregó algo grande, la reducimos
+    // igual a un máximo razonable antes de guardarla.
     const MAXDIM=2200;
     const scale=Math.min(1, MAXDIM/Math.max(srcW,srcH));
     const outW=Math.max(1,Math.round(srcW*scale));
@@ -1084,7 +1128,11 @@ async function processImageFile(file){
     finalImg.src=dataUrl;
   }catch(err){
     console.error(err);
-    showStatus('No se pudo cargar la foto. Prueba otra o en formato JPG.', 4000);
+    if(isHeic){
+      showStatus('Formato HEIC no compatible. En Cámara > Ajustes, cambia el formato de foto a JPG y vuelve a intentar.', 6000);
+    }else{
+      showStatus('No se pudo cargar la foto. Prueba otra o en formato JPG.', 4000);
+    }
   }
 }
 function loadImage(e){
