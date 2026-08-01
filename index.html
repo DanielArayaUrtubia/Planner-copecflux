@@ -80,6 +80,9 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
 #panel-chevron{font-size:14px;color:var(--text3);transition:transform .18s ease}
 #panel.collapsed #panel-chevron{transform:rotate(-90deg)}
 .line-item{padding:7px 10px;border-bottom:0.5px solid var(--border);cursor:pointer;transition:background .1s;flex-shrink:0}
+.drafting-item{background:var(--blue-bg,#e3f0fb);cursor:default;border-left:3px solid #378ADD}
+.draft-done-btn{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border:none;border-radius:6px;background:#2fae6b;color:#fff;font-size:11px;font-weight:600;cursor:pointer}
+.draft-done-btn:hover{background:#268f58}
 .line-item:hover{background:var(--bg3)}
 .line-item.selected{background:#c8dff0;border-left:2px solid var(--blue)}
 .comp-card{border-left:2px solid #fbbf24!important}
@@ -951,10 +954,19 @@ function cDown(e){
   }
   if(tool==='poly'){
     if(!drawing){
-      drawing=true;polyPts=[p,{...p}];
+      drawing=true;polyPts=[{...p}];
       cur={id:Date.now(),pts:[...polyPts],lineTypeId:'normal',pxLen:0,manualLen:null,name:'Polilínea '+lineN++};
       ci++;
-    }else{polyPts.push({...p});cur.pts=[...polyPts,{x:p.x,y:p.y}];cur.pxLen=pxLen(cur.pts);}
+      expandPanel();
+    }else{
+      const lastPp=polyPts[polyPts.length-1];
+      if(Math.hypot(p.x-lastPp.x,p.y-lastPp.y)>4){
+        polyPts.push({...p});
+        cur.pts=[...polyPts];
+        cur.pxLen=pxLen(cur.pts);
+      }
+    }
+    renderPanel();
   }
   if(tool==='slope'){
     if(!drawing){
@@ -972,6 +984,7 @@ function cDown(e){
       drawing=true;
       polyPts=[{...p}];
       curZone={id:Date.now(),pts:[{...p},{...p}],name:'Zona '+zoneN++,_isZone:true};
+      expandPanel();
     } else {
       // Ignore duplicate click (double-click second click lands ~same spot)
       var lastP=polyPts[polyPts.length-1];
@@ -980,12 +993,14 @@ function cDown(e){
         curZone.pts=[...polyPts,{...p}];
       }
     }
+    renderPanel();
   }
   if(tool==='obst'){
     if(!drawing){
       drawing=true;
       polyPts=[{...p}];
       curObst={id:Date.now(),pts:[{...p},{...p}],name:'Obst '+obstN++,_isObst:true};
+      expandPanel();
     } else {
       var lastPO=polyPts[polyPts.length-1];
       if(Math.hypot(p.x-lastPO.x,p.y-lastPO.y)>4){
@@ -993,6 +1008,7 @@ function cDown(e){
         curObst.pts=[...polyPts,{...p}];
       }
     }
+    renderPanel();
   }
 }
 
@@ -1001,17 +1017,61 @@ function cUp(e){
   // Línea e Inclinación ahora se cierran con el segundo clic (ver cDown), no al soltar el mouse.
 }
 
+function finishPolyDrawing(){
+  if(tool==='poly'&&drawing){
+    if(polyPts.length>=2){cur.pts=[...polyPts];cur.pxLen=pxLen(cur.pts);if(cur.pxLen>5){saveState();lines.push(cur);selId=cur.id;}else{showStatus('Necesitas al menos 2 puntos separados');drawing=true;return;}}
+    else{showStatus('Necesitas al menos 2 puntos');return;}
+    drawing=false;cur=null;polyPts=[];renderPanel();drawAll();
+  }
+}
+function finishZoneDrawing(){
+  if(tool==='zone'&&drawing&&curZone){
+    if(polyPts.length>=3){
+      curZone.pts=[...polyPts];
+      saveState();
+      zones.push(curZone);
+      selId=curZone.id;
+      showStatus('✓ Zona cerrada con '+polyPts.length+' puntos — ahora pulsa Paneles solares');
+    } else {
+      showStatus('Necesitas al menos 3 puntos para cerrar la zona');
+      return;
+    }
+    drawing=false;curZone=null;polyPts=[];renderPanel();drawAll();
+  }
+}
+function finishObstDrawing(){
+  if(tool==='obst'&&drawing&&curObst){
+    if(polyPts.length>=3){
+      curObst.pts=[...polyPts];
+      saveState();
+      obstructions.push(curObst);
+      selId=curObst.id;
+      showStatus('✓ Obstrucción cerrada — los paneles la evitarán');
+    } else {
+      showStatus('Necesitas al menos 3 puntos');
+      return;
+    }
+    drawing=false;curObst=null;polyPts=[];renderPanel();drawAll();
+  }
+}
+function finishDrawing(){
+  if(tool==='poly')finishPolyDrawing();
+  else if(tool==='zone')finishZoneDrawing();
+  else if(tool==='obst')finishObstDrawing();
+}
+function cancelDrawing(){
+  if(!drawing)return;
+  drawing=false;cur=null;curSlope=null;curZone=null;curObst=null;polyPts=[];
+  renderPanel();drawAll();
+  showStatus('Dibujo cancelado');
+}
 function cDbl(e){
   const p=pos(e);
   const comp=hitComp(p);
   if(comp){openCompModal(comp.id);return}
   // Obstruction now closes with Enter key, not double-click
   // Zone now closes with Enter key, not double-click
-
-  if(tool==='poly'&&drawing){
-    if(polyPts.length>=2){cur.pts=[...polyPts];cur.pxLen=pxLen(cur.pts);if(cur.pxLen>5){saveState();lines.push(cur);selId=cur.id;renderPanel();}}
-    drawing=false;cur=null;polyPts=[];drawAll();
-  }
+  finishPolyDrawing();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1025,13 +1085,13 @@ function setTool(t){
   drC.style.cursor=t==='select'?'default':t==='place'?'copy':'crosshair';
   const hints={
     line:'Clic para el punto 1, clic para el punto 2 · Verde = medida calculada · Azul = medida manual',
-    poly:'Clic para añadir puntos · Doble clic para terminar',
+    poly:'Toca para añadir puntos · Doble toque o botón "Terminar" en el panel para cerrar',
     select:'Clic para seleccionar · Arrastrar para mover · Doble clic en componente para editar',
 
     edit:'Arrastra los círculos blancos para mover vértices de la línea seleccionada',
     slope:'Clic para el punto 1, clic para el punto 2 · Edita los grados en el panel lateral',
-    zone:'Clic para añadir vértices · Enter para cerrar el polígono · Atajo: tecla R',
-    obst:'Clic para añadir vértices · Enter para cerrar · Los paneles evitarán esta área',
+    zone:'Toca para añadir vértices · Botón "Terminar" en el panel para cerrar · Atajo: tecla R',
+    obst:'Toca para añadir vértices · Botón "Terminar" en el panel para cerrar · Los paneles evitarán esta área',
     place:'Clic en el lienzo para colocar el componente',
   };
   document.getElementById('hint').textContent=hints[t]||'';
@@ -1071,12 +1131,43 @@ document.getElementById('toolbar').addEventListener('scroll',()=>{document.getEl
 // ══════════════════════════════════════════════════════════
 // IMAGE
 // ══════════════════════════════════════════════════════════
+// Convierte fotos HEIC/HEIF (formato por defecto de cámara en varios
+// Samsung/Xiaomi) a JPEG en el propio celular, usando una librería que se
+// descarga solo la primera vez que hace falta (no afecta el peso de la app
+// para fotos normales en JPG/PNG).
+let _heic2anyPromise = null;
+function loadHeic2Any(){
+  if(window.heic2any) return Promise.resolve(window.heic2any);
+  if(_heic2anyPromise) return _heic2anyPromise;
+  _heic2anyPromise = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+    s.onload = ()=> window.heic2any ? resolve(window.heic2any) : reject(new Error('heic2any no se cargó'));
+    s.onerror = ()=> reject(new Error('No se pudo descargar el conversor HEIC'));
+    document.head.appendChild(s);
+  });
+  return _heic2anyPromise;
+}
 async function processImageFile(file){
   if(!file) return;
   const looksLikeImage = file.type && file.type.startsWith('image/');
   const isHeic = /\.(heic|heif)$/i.test(file.name||'') || /heic|heif/i.test(file.type||'');
   if(!looksLikeImage && !isHeic){ showStatus('El archivo no es una imagen'); return; }
   showStatus('Cargando imagen…', 10000);
+  let workingFile = file;
+  if(isHeic){
+    try{
+      showStatus('Convirtiendo foto HEIC…', 15000);
+      const heic2any = await loadHeic2Any();
+      const converted = await heic2any({blob:file, toType:'image/jpeg', quality:0.9});
+      workingFile = Array.isArray(converted) ? converted[0] : converted;
+      showStatus('Cargando imagen…', 10000);
+    }catch(convErr){
+      console.error(convErr);
+      showStatus('No se pudo convertir la foto HEIC. Revisa tu conexión e intenta de nuevo, o cambia el formato de cámara a JPG.', 6000);
+      return;
+    }
+  }
   try{
     let srcW, srcH, drawSource;
     // createImageBitmap con resizeWidth decodifica la foto YA reducida,
@@ -1091,7 +1182,7 @@ async function processImageFile(file){
         {}
       ];
       for(const opts of attempts){
-        try{ drawSource = await createImageBitmap(file, opts); break; }
+        try{ drawSource = await createImageBitmap(workingFile, opts); break; }
         catch(err){ drawSource = null; }
       }
       if(drawSource){ srcW=drawSource.width; srcH=drawSource.height; }
@@ -1101,7 +1192,7 @@ async function processImageFile(file){
         const r=new FileReader();
         r.onload=()=>res(r.result);
         r.onerror=()=>rej(new Error('No se pudo leer el archivo'));
-        r.readAsDataURL(file);
+        r.readAsDataURL(workingFile);
       });
       const img = await new Promise((res,rej)=>{
         const im=new Image();
@@ -1129,7 +1220,7 @@ async function processImageFile(file){
   }catch(err){
     console.error(err);
     if(isHeic){
-      showStatus('Formato HEIC no compatible. En Cámara > Ajustes, cambia el formato de foto a JPG y vuelve a intentar.', 6000);
+      showStatus('Formato HEIC no compatible en este dispositivo. Cambia el formato de cámara a JPG y vuelve a intentar.', 6000);
     }else{
       showStatus('No se pudo cargar la foto. Prueba otra o en formato JPG.', 4000);
     }
@@ -1203,10 +1294,32 @@ function expandPanel(){
 
 function renderPanel(){
   const list=document.getElementById('lines-list');
-  const total=lines.length+components.length+slopes.length+zones.length;
+  const drafting = drawing && (tool==='poly'||tool==='zone'||tool==='obst') && polyPts.length>0;
+  const total=lines.length+components.length+slopes.length+zones.length+obstructions.length+(drafting?1:0);
   document.getElementById('cnt').textContent='('+total+')';
-  if(!total){list.innerHTML='<div id="empty"><i class="ti ti-vector" style="font-size:24px"></i><span>Dibuja una línea o coloca un componente</span></div>';return}
+  if(!total){list.innerHTML='<div id="empty"><i class="ti ti-vector" style="font-size:24px"></i><span>Dibuja una línea, coloca un componente o carga una fotografía de fondo.</span></div>';return}
   list.innerHTML='';
+
+  if(drafting){
+    const sc=computeAutoScale()||scale;
+    const draftPts = tool==='poly' ? [...polyPts] : [...polyPts];
+    const pxL = pxLen(draftPts);
+    const display = sc? fmt(pxL/sc)+' '+unit+' (aprox.)' : Math.round(pxL)+' px';
+    const label = tool==='poly'?'Polilínea':(tool==='zone'?'Zona':'Obstrucción');
+    const nPts = polyPts.length;
+    const d=document.createElement('div');
+    d.className='line-item drafting-item';
+    d.innerHTML =
+      '<div class="line-top">'
+      +'<div class="dot" style="background:#378ADD"></div>'
+      +'<span class="line-name" style="color:var(--blue-text,#2563a0)">'+label+' (dibujando…)</span>'
+      +'<button class="del-btn" onclick="cancelDrawing();event.stopPropagation()" title="Cancelar"><i class="ti ti-x"></i></button>'
+      +'</div>'
+      +'<div class="line-meta">'+nPts+' punto'+(nPts===1?'':'s')+' · '+display+'</div>'
+      +'<div class="mrow"><button class="draft-done-btn" onclick="finishDrawing();event.stopPropagation()"><i class="ti ti-check"></i> Terminar '+label.toLowerCase()+'</button>'
+      +'<span style="font-size:9.5px;color:var(--text3);margin-left:4px">toca el lienzo para seguir agregando puntos</span></div>';
+    list.appendChild(d);
+  }
 
   components.forEach(c=>{
     const def=COMP_DEFS[c.type];
@@ -1367,17 +1480,36 @@ function downloadImg(){
     const MAXDIM=4096;                    // límite seguro para no reventar canvas en móvil
     factor=Math.min(factor,MAXDIM/Math.max(W,H));
     factor=Math.max(factor,1);
+
+    // Si hay foto de fondo, recortamos la exportación exactamente al área
+    // que ocupa la foto (sin los bordes de cuadrícula color arena que
+    // rellenan el resto del lienzo cuando la foto no llena todo el espacio).
+    let cropW=W, cropH=H, offX=0, offY=0, iw=0, ih=0;
+    if(imgEl){
+      const r=Math.min(W/imgEl.width,H/imgEl.height);
+      iw=imgEl.width*r; ih=imgEl.height*r;
+      offX=(W-iw)/2; offY=(H-ih)/2;
+      cropW=iw; cropH=ih;
+    }
+
     const exp=document.createElement('canvas');
-    exp.width=Math.round(W*factor);exp.height=Math.round(H*factor);
+    exp.width=Math.max(1,Math.round(cropW*factor));exp.height=Math.max(1,Math.round(cropH*factor));
     const ctx=exp.getContext('2d');
     ctx.imageSmoothingEnabled=true;
     if('imageSmoothingQuality' in ctx)ctx.imageSmoothingQuality='high';
     ctx.scale(factor,factor);
-    ctx.fillStyle='#f2e8d0';ctx.fillRect(0,0,W,H);
-    ctx.strokeStyle='rgba(100,60,10,0.10)';ctx.lineWidth=0.5;
-    for(let x=0;x<W;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
-    for(let y=0;y<H;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
-    if(imgEl){const r=Math.min(W/imgEl.width,H/imgEl.height);const iw=imgEl.width*r,ih=imgEl.height*r;ctx.drawImage(imgEl,(W-iw)/2,(H-ih)/2,iw,ih);}
+    if(imgEl){
+      // Desplazamos el sistema de coordenadas para que el recorte quede
+      // alineado con la foto; todo lo que se dibuje fuera del área de la
+      // foto simplemente no entra en el canvas exportado (más chico).
+      ctx.translate(-offX,-offY);
+      ctx.drawImage(imgEl,offX,offY,iw,ih);
+    } else {
+      ctx.fillStyle='#f2e8d0';ctx.fillRect(0,0,W,H);
+      ctx.strokeStyle='rgba(100,60,10,0.10)';ctx.lineWidth=0.5;
+      for(let x=0;x<W;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+      for(let y=0;y<H;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+    }
     lines.forEach(l=>renderLine(ctx,l,false,false));
     zones.forEach(z=>renderZone(ctx,z,false,false));
     obstructions.forEach(o=>renderObstruction(ctx,o,false,false));
@@ -1429,32 +1561,12 @@ document.addEventListener('keydown',e=>{
   // Enter — close polygon (zone / obstruction)
   if(e.keyCode===13){
     if(drawing&&tool==='zone'&&curZone){
-      if(polyPts.length>=3){
-        curZone.pts=[...polyPts];
-        saveState();
-        zones.push(curZone);
-        selId=curZone.id;
-        renderPanel();
-        showStatus('\u2713 Zona cerrada con '+polyPts.length+' puntos \u2014 ahora pulsa Paneles solares');
-      } else {
-        showStatus('Necesitas al menos 3 puntos para cerrar la zona');
-      }
-      drawing=false;curZone=null;polyPts=[];drawAll();
+      finishZoneDrawing();
       e.preventDefault();
       return;
     }
     if(drawing&&tool==='obst'&&curObst){
-      if(polyPts.length>=3){
-        curObst.pts=[...polyPts];
-        saveState();
-        obstructions.push(curObst);
-        selId=curObst.id;
-        renderPanel();
-        showStatus('\u2713 Obstrucci\u00f3n cerrada \u2014 los paneles la evitar\u00e1n');
-      } else {
-        showStatus('Necesitas al menos 3 puntos');
-      }
-      drawing=false;curObst=null;polyPts=[];drawAll();
+      finishObstDrawing();
       e.preventDefault();
       return;
     }
