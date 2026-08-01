@@ -1009,11 +1009,66 @@ document.addEventListener('click',e=>{
 // ══════════════════════════════════════════════════════════
 // IMAGE
 // ══════════════════════════════════════════════════════════
+async function processImageFile(file){
+  if(!file) return;
+  const looksLikeImage = file.type && file.type.startsWith('image/');
+  const looksLikeHeic = /\.(heic|heif)$/i.test(file.name||'');
+  if(!looksLikeImage && !looksLikeHeic){ showStatus('El archivo no es una imagen'); return; }
+  showStatus('Cargando imagen…', 10000);
+  try{
+    let srcW, srcH, drawSource;
+    // createImageBitmap decodifica fotos de cámara (alta resolución) de forma
+    // más eficiente en memoria que FileReader+<img>, y con imageOrientation
+    // corrige la rotación EXIF que traen las fotos tomadas con la cámara.
+    if('createImageBitmap' in window){
+      try{
+        drawSource = await createImageBitmap(file, {imageOrientation:'from-image'});
+      }catch(errA){
+        try{ drawSource = await createImageBitmap(file); }
+        catch(errB){ drawSource = null; }
+      }
+      if(drawSource){ srcW=drawSource.width; srcH=drawSource.height; }
+    }
+    if(!drawSource){
+      const dataUrl = await new Promise((res,rej)=>{
+        const r=new FileReader();
+        r.onload=()=>res(r.result);
+        r.onerror=()=>rej(new Error('No se pudo leer el archivo'));
+        r.readAsDataURL(file);
+      });
+      const img = await new Promise((res,rej)=>{
+        const im=new Image();
+        im.onload=()=>res(im);
+        im.onerror=()=>rej(new Error('Formato de imagen no compatible'));
+        im.src=dataUrl;
+      });
+      srcW=img.naturalWidth; srcH=img.naturalHeight; drawSource=img;
+    }
+    // Las fotos de cámara suelen venir en resoluciones muy altas (12+ MP);
+    // las reducimos a un máximo razonable para que carguen rápido y no
+    // se queden pegadas por memoria, sobre todo dentro de la APK.
+    const MAXDIM=2200;
+    const scale=Math.min(1, MAXDIM/Math.max(srcW,srcH));
+    const outW=Math.max(1,Math.round(srcW*scale));
+    const outH=Math.max(1,Math.round(srcH*scale));
+    const off=document.createElement('canvas');
+    off.width=outW; off.height=outH;
+    off.getContext('2d').drawImage(drawSource,0,0,outW,outH);
+    if(drawSource.close) drawSource.close();
+    const dataUrl=off.toDataURL('image/jpeg',0.92);
+    const finalImg=new Image();
+    finalImg.onload=()=>{ bgImg=finalImg; bgImgData=dataUrl; drawBg(); drawAll(); showStatus('✓ Imagen cargada'); };
+    finalImg.onerror=()=>showStatus('No se pudo procesar la imagen', 4000);
+    finalImg.src=dataUrl;
+  }catch(err){
+    console.error(err);
+    showStatus('No se pudo cargar la foto. Prueba otra o en formato JPG.', 4000);
+  }
+}
 function loadImage(e){
-  const f=e.target.files[0];if(!f)return;
-  const reader=new FileReader();
-  reader.onload=ev=>{bgImgData=ev.target.result;const img=new Image();img.onload=()=>{bgImg=img;drawBg();drawAll();showStatus('✓ Imagen cargada')};img.src=bgImgData;};
-  reader.readAsDataURL(f);
+  const f=e.target.files[0];
+  e.target.value=''; // permite volver a elegir el mismo archivo más adelante
+  processImageFile(f);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1374,15 +1429,8 @@ document.addEventListener('keydown',e=>{
     e.preventDefault(); e.stopPropagation();
     wrap.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
-    if(!file || !file.type.startsWith('image/')) { showStatus('Solo se aceptan imágenes'); return; }
-    const reader = new FileReader();
-    reader.onload = ev => {
-      bgImgData = ev.target.result;
-      const img = new Image();
-      img.onload = () => { bgImg = img; drawBg(); drawAll(); showStatus('✓ Imagen cargada por arrastre'); };
-      img.src = bgImgData;
-    };
-    reader.readAsDataURL(file);
+    if(!file) return;
+    processImageFile(file);
   });
 })();
 
