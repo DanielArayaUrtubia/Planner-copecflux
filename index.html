@@ -203,8 +203,7 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
     <div id="canvas-wrap">
       <canvas id="bg-canvas"></canvas>
       <!-- drag-and-drop handled by JS -->
-      <canvas id="draw-canvas"
-        onmousedown="cDown(event)" onmouseup="cUp(event)" ondblclick="cDbl(event)"></canvas>
+      <canvas id="draw-canvas"></canvas>
       <div id="status-bar"></div>
     </div>
     <div id="panel">
@@ -860,24 +859,28 @@ function cMove(e){
     else drC.style.cursor='default';
   }
 }
-drC.addEventListener('mousemove',cMove);
-
-// ── Soporte táctil: arrastrar puntos, mover/redimensionar componentes ──
-// Sin esto, en el celular solo se registraban toques cortos (como clics),
-// pero no se podía "deslizar" para mover vértices, líneas ni componentes.
-let _lastTapTime=0, _lastTapPos=null;
-drC.addEventListener('touchstart',e=>{
+// ── Entrada unificada (mouse + dedo) vía Pointer Events ──────────────
+// Antes usábamos mousedown/mouseup + touchstart/touchmove/touchend por
+// separado. En algunos navegadores/WebViews eso puede disparar el evento
+// táctil Y un evento de mouse "fantasma" para el mismo toque, agregando
+// el punto dos veces y haciendo que el dibujo se viera "pisado" o sin
+// cambios hasta arrastrar. Pointer Events evita esa duplicación: cada
+// toque o clic genera un único pointerdown/pointermove/pointerup.
+let _lastTapTime=0, _lastTapPos=null, _pointerDownAt=null;
+drC.addEventListener('pointerdown',e=>{
   e.preventDefault();
+  if(drC.setPointerCapture)try{drC.setPointerCapture(e.pointerId)}catch(err){}
+  _pointerDownAt=pos(e);
   cDown(e);
-},{passive:false});
-drC.addEventListener('touchmove',e=>{
+});
+drC.addEventListener('pointermove',e=>{
   e.preventDefault();
   cMove(e);
-},{passive:false});
-drC.addEventListener('touchend',e=>{
+});
+drC.addEventListener('pointerup',e=>{
   e.preventDefault();
   cUp(e);
-  // Doble-toque rápido en el mismo punto = doble clic (cierra polilínea/zona/obstrucción)
+  // Doble-toque/doble-clic rápido en el mismo punto = cierra polilínea
   const p=pos(e);
   const now=Date.now();
   if(_lastTapPos && (now-_lastTapTime)<350 && Math.hypot(p.x-_lastTapPos.x,p.y-_lastTapPos.y)<24){
@@ -886,7 +889,8 @@ drC.addEventListener('touchend',e=>{
   } else {
     _lastTapTime=now;_lastTapPos=p;
   }
-},{passive:false});
+});
+drC.addEventListener('pointercancel',e=>{cUp(e)});
 
 function cDown(e){
   closeAllDds();
