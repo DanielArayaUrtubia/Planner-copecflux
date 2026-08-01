@@ -57,7 +57,7 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
 .tool-btn.danger{color:#f87171}.tool-btn.danger:hover{background:var(--red-bg)}
 .tool-btn i{font-size:13px}
 .dropdown{position:relative}
-.dropdown-menu{display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:8px;padding:6px;z-index:200;width:230px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.dropdown-menu{display:none;position:fixed;background:var(--bg2);border:0.5px solid var(--border2);border-radius:8px;padding:6px;z-index:400;width:230px;max-height:70vh;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .dropdown-menu.open{display:block}
 .dropdown-title{font-size:10px;color:var(--text3);font-weight:600;letter-spacing:.8px;text-transform:uppercase;padding:4px 6px 6px;border-bottom:0.5px solid var(--border);margin-bottom:5px}
 .comp-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;transition:background .1s}
@@ -68,7 +68,7 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
 .comp-desc{font-size:10px;color:var(--text3);margin-top:1px}
 /* Line type dropdown */
 
-#scale-badge{position:absolute;bottom:8px;right:8px;display:flex;align-items:center;gap:5px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);white-space:nowrap;z-index:2;box-shadow:0 1px 4px rgba(0,0,0,0.12)}
+#scale-badge{display:flex;align-items:center;gap:5px;margin-left:auto;font-size:11px;color:var(--text3);white-space:nowrap;flex-shrink:0}
 #scale-badge select{padding:2px 5px;border:0.5px solid var(--border2);border-radius:5px;font-size:11px;background:var(--bg2);color:var(--text1)}
 #main{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0}
 #canvas-wrap{flex:1;position:relative;overflow:hidden;min-height:0}
@@ -155,11 +155,18 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
   </div>
   
   <div id="toolbar">
-    <!-- Herramientas principales -->
+    <!-- Líneas -->
     <button class="tool-btn active" id="btn-line" onclick="setTool('line')"><i class="ti ti-minus"></i> Línea</button>
     <button class="tool-btn" id="btn-poly" onclick="setTool('poly')"><i class="ti ti-vector"></i> Polilínea</button>
+    <div class="sep"></div>
     <button class="tool-btn" id="btn-select" onclick="setTool('select')"><i class="ti ti-pointer"></i> Seleccionar</button>
+    <button class="tool-btn" id="btn-edit" onclick="setTool('edit')" title="Mover puntos"><i class="ti ti-pencil"></i> Editar pts</button>
     <button class="tool-btn" id="btn-slope" onclick="setTool('slope')" title="Inclinacion"><i class="ti ti-angle"></i> Inclinación</button>
+    <div class="sep"></div>
+    <button class="tool-btn panels-btn" id="btn-zone" onclick="setTool('zone')" title="Dibujar zona para paneles (atajo: R)"><i class="ti ti-polygon"></i> Zona</button>
+    <button class="tool-btn panels-btn" id="btn-fitpanels" onclick="openPanelModal()" title="Optimizar paneles en zona"><i class="ti ti-layout-grid-add"></i> Paneles solares</button>
+    <button class="tool-btn" id="btn-obst" onclick="setTool('obst')" title="Dibujar obstrucción dentro de zona" style="background:#fff0e6;border-color:#cc4400;color:#8a2200"><i class="ti ti-ban"></i> Obstrucción</button>
+    <div class="sep"></div>
     <div class="dropdown" id="comp-dropdown">
       <button class="tool-btn" onclick="toggleCompDd()" id="btn-comp"><i class="ti ti-layout-grid"></i> Componentes <i class="ti ti-chevron-down" style="font-size:9px"></i></button>
       <div class="dropdown-menu" id="comp-menu">
@@ -167,17 +174,19 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
         <div id="comp-item-list"></div>
       </div>
     </div>
+    <div class="sep"></div>
     <button class="tool-btn img-btn" onclick="document.getElementById('img-inp').click()"><i class="ti ti-photo"></i> Cargar Imagen</button>
     <input type="file" id="img-inp" accept="image/*" style="display:none" onchange="loadImage(event)">
-    <button class="tool-btn dl-btn" id="btn-dl" onclick="downloadImg()"><i class="ti ti-download"></i> Descargar Imagen</button>
-    <div class="sep"></div>
-    <!-- Herramientas avanzadas -->
-    <button class="tool-btn" id="btn-edit" onclick="setTool('edit')" title="Mover puntos"><i class="ti ti-pencil"></i> Editar pts</button>
-    <button class="tool-btn panels-btn" id="btn-zone" onclick="setTool('zone')" title="Dibujar zona para paneles (atajo: R)"><i class="ti ti-polygon"></i> Zona</button>
-    <button class="tool-btn panels-btn" id="btn-fitpanels" onclick="openPanelModal()" title="Optimizar paneles en zona"><i class="ti ti-layout-grid-add"></i> Paneles solares</button>
-    <button class="tool-btn" id="btn-obst" onclick="setTool('obst')" title="Dibujar obstrucción dentro de zona" style="background:#fff0e6;border-color:#cc4400;color:#8a2200"><i class="ti ti-ban"></i> Obstrucción</button>
     <button class="tool-btn" onclick="openModal()"><i class="ti ti-ruler"></i> Escala</button>
+    <button class="tool-btn dl-btn" id="btn-dl" onclick="downloadImg()"><i class="ti ti-download"></i> Descargar Imagen</button>
     <button class="tool-btn danger" onclick="clearAll()"><i class="ti ti-trash"></i></button>
+    <div id="scale-badge">
+      <span id="scale-disp">Sin escala</span>
+      <select id="unit-sel" onchange="updateUnit()">
+        <option value="m">m</option><option value="cm">cm</option><option value="mm">mm</option>
+        <option value="ft">ft</option><option value="in">in</option><option value="px">px</option>
+      </select>
+    </div>
   </div>
 
   <div id="main">
@@ -187,13 +196,6 @@ html,body{height:100%;overflow:hidden;background:#f2e8d0;font-family:'Segoe UI',
       <canvas id="draw-canvas"
         onmousedown="cDown(event)" onmouseup="cUp(event)" ondblclick="cDbl(event)"></canvas>
       <div id="status-bar"></div>
-      <div id="scale-badge">
-        <span id="scale-disp">Sin escala</span>
-        <select id="unit-sel" onchange="updateUnit()">
-          <option value="m">m</option><option value="cm">cm</option><option value="mm">mm</option>
-          <option value="ft">ft</option><option value="in">in</option><option value="px">px</option>
-        </select>
-      </div>
     </div>
     <div id="panel">
       <div id="panel-head" onclick="togglePanel()">
@@ -1000,11 +1002,31 @@ function setTool(t){
 // DROPDOWNS
 // ══════════════════════════════════════════════════════════
 
-function toggleCompDd(){document.getElementById('comp-menu').classList.toggle('open')}
+function toggleCompDd(){
+  const menu=document.getElementById('comp-menu');
+  const willOpen=!menu.classList.contains('open');
+  menu.classList.remove('open');
+  if(willOpen){
+    const btn=document.getElementById('btn-comp');
+    const r=btn.getBoundingClientRect();
+    const menuW=Math.min(230, window.innerWidth-16);
+    let left=r.left;
+    if(left+menuW>window.innerWidth-8) left=window.innerWidth-menuW-8;
+    if(left<8) left=8;
+    let top=r.bottom+4;
+    const maxTop=window.innerHeight-16;
+    if(top>maxTop) top=maxTop;
+    menu.style.left=left+'px';
+    menu.style.top=top+'px';
+    menu.style.width=menuW+'px';
+    menu.classList.add('open');
+  }
+}
 function closeAllDds(){document.getElementById('comp-menu').classList.remove('open')}
 document.addEventListener('click',e=>{
   if(!document.getElementById('comp-dropdown').contains(e.target))document.getElementById('comp-menu').classList.remove('open');
 });
+document.getElementById('toolbar').addEventListener('scroll',()=>{document.getElementById('comp-menu').classList.remove('open')});
 
 // ══════════════════════════════════════════════════════════
 // IMAGE
