@@ -888,9 +888,27 @@ function flushLabelQueue(ctx){
   _labelQueue=[];
 }
 function computeAutoScale(){
-  const refs=lines.filter(l=>l.manualLen!=null&&l.pxLen>0);
-  if(!refs.length)return null;
-  return refs.reduce((s,l)=>s+l.pxLen/l.manualLen,0)/refs.length;
+  const ratios=[];
+  lines.forEach(function(l){
+    if(l.manualLen!=null&&l.pxLen>0)ratios.push(l.pxLen/l.manualLen);
+  });
+  // Los lados de una zona con medida manual también cuentan como
+  // referencia de escala (igual que una línea de calibración), así que
+  // si mides un lado en terreno, esa medida ayuda a calibrar toda la app
+  // — incluidos los paneles solares que se calculen después.
+  zones.forEach(function(z){
+    if(!z.edgeManual||!z.pts||z.pts.length<2)return;
+    const n=z.pts.length;
+    for(let i=0;i<n;i++){
+      const m=z.edgeManual[i];
+      if(m==null||m<=0)continue;
+      const p1=z.pts[i], p2=z.pts[(i+1)%n];
+      const segLen=Math.hypot(p2.x-p1.x,p2.y-p1.y);
+      if(segLen>0)ratios.push(segLen/m);
+    }
+  });
+  if(!ratios.length)return null;
+  return ratios.reduce((s,r)=>s+r,0)/ratios.length;
 }
 function pos(e){
   const r=drC.getBoundingClientRect();
@@ -990,13 +1008,18 @@ let viewScale=1, viewX=0, viewY=0;
 let _activePointers=new Map();
 let _pinch=null;
 
+const MIN_VIEW_SCALE=0.2, MAX_VIEW_SCALE=6;
 function clampView(){
-  viewScale=Math.min(Math.max(viewScale,1),6);
-  if(viewScale<=1.001){viewX=0;viewY=0;return}
+  viewScale=Math.min(Math.max(viewScale,MIN_VIEW_SCALE),MAX_VIEW_SCALE);
   const w=drC.clientWidth*viewScale, h=drC.clientHeight*viewScale;
-  const minX=drC.clientWidth-w, minY=drC.clientHeight-h;
-  viewX=Math.min(0,Math.max(minX,viewX));
-  viewY=Math.min(0,Math.max(minY,viewY));
+  // Si el contenido con zoom es más chico que el lienzo en algún eje,
+  // lo centramos en ese eje en vez de dejarlo pegado a una esquina.
+  const minX=Math.min(0,drC.clientWidth-w), maxX=Math.max(0,drC.clientWidth-w);
+  const minY=Math.min(0,drC.clientHeight-h), maxY=Math.max(0,drC.clientHeight-h);
+  if(w<=drC.clientWidth) viewX=(drC.clientWidth-w)/2;
+  else viewX=Math.min(0,Math.max(minX,viewX));
+  if(h<=drC.clientHeight) viewY=(drC.clientHeight-h)/2;
+  else viewY=Math.min(0,Math.max(minY,viewY));
 }
 function applyViewTransform(){
   const t='translate('+viewX+'px,'+viewY+'px) scale('+viewScale+')';
@@ -1009,24 +1032,89 @@ function resetView(){viewScale=1;viewX=0;viewY=0;applyViewTransform();}
 function zoomBy(factor,cx,cy){
   const wrap=document.getElementById('canvas-wrap');
   if(cx==null){cx=wrap.clientWidth/2;cy=wrap.clientHeight/2;}
-  const newScale=Math.min(Math.max(viewScale*factor,1),6);
+  const newScale=Math.min(Math.max(viewScale*factor,MIN_VIEW_SCALE),MAX_VIEW_SCALE);
   const logX=(cx-viewX)/viewScale, logY=(cy-viewY)/viewScale;
   viewScale=newScale;
   viewX=cx-logX*viewScale; viewY=cy-logY*viewScale;
   clampView();applyViewTransform();
 }
+// Ajusta el zoom/paneo para que un rectángulo (en coordenadas del
+// lienzo, sin transformar) quede completo y centrado en pantalla, con
+// un margen. Se usa después de "Enderezar" u otras acciones que puedan
+// dejar la figura más grande que la vista actual.
+function fitViewToBounds(minX,minY,maxX,maxY,padding){
+  padding=padding==null?40:padding;
+  const w=maxX-minX, h=maxY-minY;
+  if(w<=0||h<=0)return;
+  const availW=drC.clientWidth-padding*2, availH=drC.clientHeight-padding*2;
+  if(availW<=0||availH<=0)return;
+  let s=Math.min(availW/w, availH/h);
+  s=Math.min(Math.max(s,MIN_VIEW_SCALE),MAX_VIEW_SCALE);
+  const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  viewScale=s;
+  viewX=drC.clientWidth/2-cx*s;
+  viewY=drC.clientHeight/2-cy*s;
+  clampView();applyViewTransform();
+}
+
+// ── Deshacer un clic accidental al iniciar un pellizco ──────────────
+// Cuando el primer dedo toca la pantalla, se registra como clic de
+// inmediato (para que dibujar/seleccionar se sienta instantáneo). Pero
+// si un segundo dedo llega enseguida (o sea, el usuario en realidad
+// quería hacer zoom con dos dedos), ese primer "clic" se deshace solo.
+function _snapshotClickState(){
+  return {
+    drawing:drawing,
+    cur: cur?{...cur, pts:cur.pts.map(function(pt){return {...pt};})}:null,
+    curSlope: curSlope?{p1:{...curSlope.p1},p2:{...curSlope.p2},id:curSlope.id,manualDeg:curSlope.manualDeg,_isSlope:true,name:curSlope.name}:null,
+    curZone: curZone?{...curZone, pts:curZone.pts.map(function(pt){return {...pt};})}:null,
+    curObst: curObst?{...curObst, pts:curObst.pts.map(function(pt){return {...pt};})}:null,
+    polyPts: polyPts.map(function(pt){return {...pt};}),
+    linesLen: lines.length, slopesLen: slopes.length, zonesLen: zones.length, obstLen: obstructions.length,
+    selId: selId
+  };
+}
+function _restoreClickState(snap){
+  drawing=snap.drawing; cur=snap.cur; curSlope=snap.curSlope; curZone=snap.curZone; curObst=snap.curObst;
+  polyPts=snap.polyPts; selId=snap.selId;
+  if(lines.length>snap.linesLen)lines.length=snap.linesLen;
+  if(slopes.length>snap.slopesLen)slopes.length=snap.slopesLen;
+  if(zones.length>snap.zonesLen)zones.length=snap.zonesLen;
+  if(obstructions.length>snap.obstLen)obstructions.length=snap.obstLen;
+  renderPanel(); drawAll();
+}
+let _clickSnapshot=null, _clickSnapshotTime=0;
+let _midPan=null, _emptyPan=null;
 
 drC.addEventListener('pointerdown',e=>{
   e.preventDefault();
+  // Clic central del mouse (botón 3) = arrastrar para moverte por la
+  // foto cuando hay zoom, sin interferir con dibujar/editar (que usan
+  // clic izquierdo).
+  if(e.button===1){
+    if(drC.setPointerCapture)try{drC.setPointerCapture(e.pointerId)}catch(err){}
+    _midPan={startClientX:e.clientX,startClientY:e.clientY,startViewX:viewX,startViewY:viewY};
+    return;
+  }
   if(drC.setPointerCapture)try{drC.setPointerCapture(e.pointerId)}catch(err){}
   _activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(_activePointers.size===1){
+    _clickSnapshot=_snapshotClickState();
+    _clickSnapshotTime=Date.now();
     _pointerDownAt=pos(e);
     cDown(e);
   } else if(_activePointers.size===2){
     // Empieza el pellizco: cancela cualquier arrastre de un solo dedo en curso
     // (mover punto/componente) para que no se mezcle con el zoom.
     resizingComp=null;resizeStart=null;compDragId=null;editDragPt=null;_editDragStarted=false;
+    _emptyPan=null;
+    // Si el primer dedo alcanzó a registrarse como clic/punto justo antes
+    // de que llegara este segundo dedo, lo deshacemos: el usuario quería
+    // hacer zoom, no dibujar.
+    if(_clickSnapshot && (Date.now()-_clickSnapshotTime)<450){
+      _restoreClickState(_clickSnapshot);
+    }
+    _clickSnapshot=null;
     const pts=Array.from(_activePointers.values());
     const dx=pts[0].x-pts[1].x, dy=pts[0].y-pts[1].y;
     const wrapRect=document.getElementById('canvas-wrap').getBoundingClientRect();
@@ -1040,13 +1128,25 @@ drC.addEventListener('pointerdown',e=>{
 });
 drC.addEventListener('pointermove',e=>{
   e.preventDefault();
+  if(_midPan){
+    viewX=_midPan.startViewX+(e.clientX-_midPan.startClientX);
+    viewY=_midPan.startViewY+(e.clientY-_midPan.startClientY);
+    clampView();applyViewTransform();
+    return;
+  }
+  if(_emptyPan){
+    viewX=_emptyPan.startViewX+(e.clientX-_emptyPan.startClientX);
+    viewY=_emptyPan.startViewY+(e.clientY-_emptyPan.startClientY);
+    clampView();applyViewTransform();
+    return;
+  }
   if(_activePointers.has(e.pointerId))_activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(_activePointers.size>=2&&_pinch){
     const pts=Array.from(_activePointers.values());
     const dx=pts[0].x-pts[1].x, dy=pts[0].y-pts[1].y;
     const dist=Math.hypot(dx,dy)||1;
     let newScale=_pinch.startScale*(dist/_pinch.startDist);
-    newScale=Math.min(Math.max(newScale,1),6);
+    newScale=Math.min(Math.max(newScale,MIN_VIEW_SCALE),MAX_VIEW_SCALE);
     const wrapRect=document.getElementById('canvas-wrap').getBoundingClientRect();
     const curMid={x:(pts[0].x+pts[1].x)/2-wrapRect.left,y:(pts[0].y+pts[1].y)/2-wrapRect.top};
     // el punto lógico que estaba bajo el centro del pellizco al iniciar
@@ -1061,6 +1161,8 @@ drC.addEventListener('pointermove',e=>{
   cMove(e);
 });
 function _pointerEnd(e){
+  if(_midPan){_midPan=null;return;}
+  if(_emptyPan){_emptyPan=null;return;}
   _activePointers.delete(e.pointerId);
   if(_activePointers.size<2)_pinch=null;
   if(_activePointers.size===0){
@@ -1076,7 +1178,8 @@ function _pointerEnd(e){
   }
 }
 drC.addEventListener('pointerup',e=>{e.preventDefault();_pointerEnd(e);});
-drC.addEventListener('pointercancel',e=>{_activePointers.delete(e.pointerId);if(_activePointers.size<2)_pinch=null;cUp(e);});
+drC.addEventListener('pointercancel',e=>{_midPan=null;_emptyPan=null;_activePointers.delete(e.pointerId);if(_activePointers.size<2)_pinch=null;cUp(e);});
+drC.addEventListener('contextmenu',e=>{e.preventDefault();});
 
 // Zoom con rueda del mouse (escritorio) — centrado en el cursor
 drC.addEventListener('wheel',e=>{
@@ -1144,7 +1247,14 @@ function cDown(e){
     if(obstHit&&!slopeHit&&!lId){
       selId=obstHit.id;setTool('edit');renderPanel();drawAll();return;
     }
-    selId=slopeHit?slopeHit.id:(lId||null);renderPanel();drawAll();return;
+    const pickedId=slopeHit?slopeHit.id:(lId||null);
+    selId=pickedId;renderPanel();drawAll();
+    if(!pickedId){
+      // Nada debajo del dedo/cursor: en vez de no hacer nada, arrastrar
+      // aquí mueve la vista (útil para desplazarte por la foto con zoom).
+      _emptyPan={startClientX:e.clientX,startClientY:e.clientY,startViewX:viewX,startViewY:viewY};
+    }
+    return;
   }
   if(tool==='line'){
     if(!drawing){
@@ -1669,6 +1779,7 @@ function renderPanel(){
       +'<div class="line-meta">'+pnlInfo+'</div>'
       +'<div class="mrow">'
       +'<button onclick="startZoneEdit(event,'+z.id+')"><i class="ti ti-pencil" style="font-size:10px"></i> Editar</button>'
+      +'<button onclick="straightenZone('+z.id+');event.stopPropagation()" title="Ajustar ángulos a 90° usando las medidas ingresadas"><i class="ti ti-ruler-2" style="font-size:10px"></i> Enderezar</button>'
       +'<button onclick="openPanelModal('+z.id+');event.stopPropagation()"><i class="ti ti-layout-grid-add" style="font-size:10px"></i> Paneles</button>'
       +(layout?'<button onclick="panelLayouts=panelLayouts.filter(function(l){return l.zoneId!=='+z.id+'});saveState();renderPanel();drawAll();event.stopPropagation()" style="color:#b04040" title="Quitar paneles"><i class="ti ti-trash" style="font-size:10px"></i></button>':'')
       +'</div>'
@@ -1963,8 +2074,8 @@ function renderPanelLayout(ctx, layout){
   if(!layout||!layout.panels) return;
   ctx.save();
   layout.panels.forEach(function(panel){
-    ctx.fillStyle='rgba(30,80,180,0.22)';
-    ctx.strokeStyle='#2a5acc';
+    ctx.fillStyle=panel._mixed?'rgba(30,150,120,0.24)':'rgba(30,80,180,0.22)';
+    ctx.strokeStyle=panel._mixed?'#1a9a70':'#2a5acc';
     ctx.lineWidth=1;
     if(panel.corners){
       // Rotated panel — draw as polygon
@@ -2010,6 +2121,17 @@ function renderPanelLayout(ctx, layout){
 // PANEL FITTING ALGORITHM
 // ══════════════════════════════════════════════════════════
 function fitPanels(){
+  var resEl=document.getElementById('pm-result');
+  if(resEl)resEl.textContent='Calculando…';
+  var btn=document.getElementById('pm-calc-btn');
+  var origTxt=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='Calculando…';}
+  setTimeout(function(){
+    try{ fitPanelsInner(); }
+    finally{ if(btn){btn.disabled=false;btn.textContent=origTxt;} }
+  },30);
+}
+function fitPanelsInner(){
   var largo=parseFloat(document.getElementById('pm-largo').value)||2.30;
   var ancho=parseFloat(document.getElementById('pm-ancho').value)||1.15;
   var margen=parseFloat(document.getElementById('pm-margen').value)||0.05;
@@ -2059,9 +2181,16 @@ function fitPanels(){
 
   // ── Check rotated rect samples against rotated zone + obstructions ──
   function rectOK_rotated(rx,ry,rw,rh, rZone, rObsts){
+    // Pequeño margen de tolerancia hacia adentro: al dibujar una zona a
+    // mano sobre una foto, el polígono nunca queda perfectamente recto,
+    // así que exigir que las 4 esquinas exactas del panel estén dentro
+    // rechazaba paneles que en la práctica sí caben. Con este margen se
+    // toleran esas imprecisiones sub-milimétricas sin permitir que el
+    // panel realmente se salga de la zona.
+    var inset=Math.min(rw,rh,4);
     var samples=[
-      {x:rx+1,     y:ry+1},    {x:rx+rw-1, y:ry+1},
-      {x:rx+rw-1,  y:ry+rh-1},{x:rx+1,    y:ry+rh-1},
+      {x:rx+inset,     y:ry+inset},    {x:rx+rw-inset, y:ry+inset},
+      {x:rx+rw-inset,  y:ry+rh-inset},{x:rx+inset,    y:ry+rh-inset},
       {x:rx+rw/2,  y:ry+rh/2},
       {x:rx+rw*.25,y:ry+rh*.75},{x:rx+rw*.75,y:ry+rh*.25}
     ];
@@ -2167,7 +2296,7 @@ function fitPanels(){
         {x:gx,   y:gy},   {x:gx+pw,y:gy},
         {x:gx+pw,y:gy+ph},{x:gx,   y:gy+ph}
       ].map(function(pt){return rotPt(pt,cx,cy,h.cosB,h.sinB);});
-      return {corners:corners,x:gx,y:gy,w:pw,h:ph,angleDeg:angleDeg,label:''};
+      return {corners:corners,x:gx,y:gy,w:pw,h:ph,angleDeg:angleDeg,label:'',_gx:gx,_gy:gy,_pw:pw,_ph:ph};
     }
 
     function packRows(yOffset, xOffset){
@@ -2194,11 +2323,101 @@ function fitPanels(){
     }
 
     var bestLocal=[], bestLocalCount=0;
-    var phases=[0,0.33,0.66];
+    var phases=[0,0.15,0.3,0.45,0.6,0.75,0.9];
     phases.forEach(function(py){
       phases.forEach(function(px){
         var res=packRows(py*stepY,px*stepX);
         if(res.length>bestLocalCount){bestLocalCount=res.length;bestLocal=res;}
+      });
+    });
+
+    // ── Centrar el bloque completo dentro del margen sobrante ──
+    // Tras encontrar el acomodo con más paneles, si sobra espacio parejo
+    // de más de un lado (porque el bloque quedó pegado a una esquina),
+    // lo desplazamos para repartir ese margen — pero solo si, al mover
+    // TODOS los paneles ese mismo desplazamiento, siguen cabiendo bien
+    // dentro del borde real de la zona (nunca a costa de perder paneles).
+    if(bestLocal.length>0){
+      var gxs=bestLocal.map(function(p){return p._gx;}), gxs2=bestLocal.map(function(p){return p._gx+p._pw;});
+      var gys=bestLocal.map(function(p){return p._gy;}), gys2=bestLocal.map(function(p){return p._gy+p._ph;});
+      var minGX=Math.min.apply(null,gxs), maxGX2=Math.max.apply(null,gxs2);
+      var minGY=Math.min.apply(null,gys), maxGY2=Math.max.apply(null,gys2);
+      var leftM=minGX-minRX, rightM=maxRX-maxGX2;
+      var topM=minGY-minRY, botM=maxRY-maxGY2;
+      var dx=(rightM-leftM)/2, dy=(botM-topM)/2;
+      if(Math.abs(dx)>1||Math.abs(dy)>1){
+        var allOk=bestLocal.every(function(p){return rectOK_rotated(p._gx+dx,p._gy+dy,p._pw,p._ph,rZone,rObsts);});
+        if(allOk){
+          bestLocal=bestLocal.map(function(p){
+            var ngx=p._gx+dx, ngy=p._gy+dy;
+            var corners=[
+              {x:ngx,      y:ngy},      {x:ngx+p._pw,y:ngy},
+              {x:ngx+p._pw,y:ngy+p._ph},{x:ngx,      y:ngy+p._ph}
+            ].map(function(pt){return rotPt(pt,cx,cy,h.cosB,h.sinB);});
+            return {corners:corners,x:ngx,y:ngy,w:p._pw,h:p._ph,angleDeg:angleDeg,label:'',_gx:ngx,_gy:ngy,_pw:p._pw,_ph:p._ph,_mixed:p._mixed};
+          });
+        }
+      }
+    }
+    return bestLocal;
+  }
+
+  // ── Relleno secundario: aprovecha el espacio sobrante que quedó tras
+  // colocar la orientación principal, probando la orientación PERPENDICULAR
+  // (mezcla horizontal/vertical) en vez de dejarlo vacío. Por ejemplo, si
+  // tras las filas horizontales sobra una franja angosta al costado, ahí
+  // pueden caber paneles en vertical que no cabrían en horizontal.
+  function packRowsAvoiding(pw, ph, angleDeg, avoidRects){
+    var h=rotateHelpers(angleDeg);
+    var rZone=h.rZone, rObsts=h.rObsts;
+    var rxs=rZone.map(function(p){return p.x;}), rys=rZone.map(function(p){return p.y;});
+    var minRX=Math.min.apply(null,rxs), maxRX=Math.max.apply(null,rxs);
+    var minRY=Math.min.apply(null,rys), maxRY=Math.max.apply(null,rys);
+    var bH=maxRY-minRY;
+    var stepX=pw+pxM, stepY=ph+pxM;
+    var gapM=pxM*0.4;
+
+    function toCanvasLocal(gx,gy){
+      var corners=[
+        {x:gx,y:gy},{x:gx+pw,y:gy},{x:gx+pw,y:gy+ph},{x:gx,y:gy+ph}
+      ].map(function(pt){return rotPt(pt,cx,cy,h.cosB,h.sinB);});
+      return {corners:corners,x:gx,y:gy,w:pw,h:ph,angleDeg:angleDeg,label:'',_gx:gx,_gy:gy,_pw:pw,_ph:ph};
+    }
+    function overlapsAny(gx,gy,list){
+      for(var i=0;i<list.length;i++){
+        var r=list[i];
+        if(!(gx+pw+gapM<=r.gx||r.gx+r.pw+gapM<=gx||gy+ph+gapM<=r.gy||r.gy+r.ph+gapM<=gy)) return true;
+      }
+      return false;
+    }
+
+    var rows2=Math.ceil(bH/stepY)+2;
+    var probeStep=Math.max(pxM*0.6,4);
+    var phases=[0,0.15,0.3,0.45,0.6,0.75,0.9];
+    var bestLocal=[], bestCount=0;
+    phases.forEach(function(py){
+      phases.forEach(function(px){
+        var localPlaced=[];
+        var localAvoid=avoidRects.slice();
+        for(var r=0;r<rows2;r++){
+          var gy=minRY+py*stepY+r*stepY;
+          if(gy+ph>maxRY+stepY) continue;
+          var gx=minRX+px*stepX;
+          var maxScan=maxRX+stepX*2;
+          var guard=0;
+          while(gx<maxScan && guard<300){
+            guard++;
+            if(!overlapsAny(gx,gy,localAvoid) && rectOK_rotated(gx,gy,pw,ph,rZone,rObsts)){
+              var panel=toCanvasLocal(gx,gy);
+              localPlaced.push(panel);
+              localAvoid.push({gx:gx,gy:gy,pw:pw,ph:ph});
+              gx+=stepX;
+            } else {
+              gx+=probeStep;
+            }
+          }
+        }
+        if(localPlaced.length>bestCount){bestCount=localPlaced.length;bestLocal=localPlaced;}
       });
     });
     return bestLocal;
@@ -2263,6 +2482,24 @@ function fitPanels(){
   bestAngle=chosen.angleDeg||0;
   bestOrient=chosen.orientName||'horizontal';
 
+  // ── Relleno secundario con la orientación perpendicular ──
+  // Si el modo de orientación no está forzado a un solo tipo (h/v),
+  // probamos rellenar el espacio sobrante con paneles en la orientación
+  // contraria a la principal, para aprovechar al máximo la zona.
+  var mixedCount=0;
+  if(orient!=='h'&&orient!=='v'&&best.length>0){
+    var secPW = bestOrient==='horizontal' ? pxA : pxL;
+    var secPH = bestOrient==='horizontal' ? pxL : pxA;
+    var avoidRects = best.map(function(p){return {gx:p._gx,gy:p._gy,pw:p._pw,ph:p._ph};});
+    var extra = packRowsAvoiding(secPW, secPH, bestAngle, avoidRects);
+    if(extra.length>0){
+      extra.forEach(function(p){p._mixed=true;});
+      best = best.concat(extra);
+      bestCount = best.length;
+      mixedCount = extra.length;
+    }
+  }
+
   best.forEach(function(p,i){p.label=(i+1)+'';});
 
   if(best.length===0){
@@ -2280,9 +2517,10 @@ function fitPanels(){
   });
 
   var angleNote=bestAngle>1?' a '+bestAngle.toFixed(0)+'\u00b0':'';
-  resEl.textContent='\u2713 '+best.length+' paneles ['+bestOrient+angleNote+'] \u2014 '+largo+'\u00d7'+ancho+'m';
+  var mixNote=mixedCount>0?' (+'+mixedCount+' mixtos aprovechando espacio)':'';
+  resEl.textContent='\u2713 '+best.length+' paneles ['+bestOrient+angleNote+']'+mixNote+' \u2014 '+largo+'\u00d7'+ancho+'m';
   saveState(); closePanelModal(); drawAll();
-  showStatus('\u2713 '+best.length+' paneles en '+z.name+(bestAngle>1?' (rotados '+bestAngle.toFixed(0)+'\u00b0)':''));
+  showStatus('\u2713 '+best.length+' paneles en '+z.name+(mixedCount>0?' ('+mixedCount+' en orientación mixta)':(bestAngle>1?' (rotados '+bestAngle.toFixed(0)+'\u00b0)':'')));
 }
 var _activePanelZoneId=null;
 function openPanelModal(forceZoneId){
@@ -2306,6 +2544,105 @@ function closePanelModal(){
 }
 
 function delObst(id){saveState();obstructions=obstructions.filter(function(o){return o.id!==id;});if(selId===id)selId=null;renderPanel();drawAll();}
+// ── Enderezar zona ────────────────────────────────────────────────
+// Reconstruye el polígono de la zona forzando ángulos de 90° (como un
+// plano CAD) y usando la medida MANUAL de cada lado si existe (si no,
+// mantiene su longitud actual). Los lados sin medida manual absorben
+// cualquier diferencia necesaria para que el contorno cierre bien.
+function straightenZone(zid){
+  const z=zones.find(function(x){return x.id===zid;});
+  if(!z||!z.pts||z.pts.length<3)return;
+  const sc=computeAutoScale()||scale;
+  if(!sc){showStatus('Necesitas configurar la escala primero (línea o lado con medida manual).');return;}
+  const n=z.pts.length;
+
+  // Ángulo dominante (el lado más largo) como referencia "horizontal"
+  let bestLen=-1, domAngle=0;
+  for(let i=0;i<n;i++){
+    const j=(i+1)%n;
+    const dx=z.pts[j].x-z.pts[i].x, dy=z.pts[j].y-z.pts[i].y;
+    const len=Math.hypot(dx,dy);
+    if(len>bestLen){bestLen=len;domAngle=Math.atan2(dy,dx);}
+  }
+  const cosA=Math.cos(-domAngle), sinA=Math.sin(-domAngle);
+  const cosB=Math.cos(domAngle), sinB=Math.sin(domAngle);
+
+  // Clasificar cada lado por dirección cardinal (0=der,1=abajo,2=izq,3=arriba)
+  const edges=[];
+  for(let i=0;i<n;i++){
+    const j=(i+1)%n;
+    const dx=z.pts[j].x-z.pts[i].x, dy=z.pts[j].y-z.pts[i].y;
+    const curLen=Math.hypot(dx,dy);
+    const rx=dx*cosA-dy*sinA, ry=dx*sinA+dy*cosA;
+    let card=Math.round(Math.atan2(ry,rx)/(Math.PI/2))%4;
+    if(card<0)card+=4;
+    const manual=(z.edgeManual&&z.edgeManual[i]!=null)?z.edgeManual[i]*sc:null;
+    edges.push({card:card, len:(manual!=null?manual:curLen), isManual:manual!=null});
+  }
+
+  // Cierre exacto del contorno: los lados SIN medida manual absorben la
+  // diferencia; si todos los lados de un eje tienen medida manual, se
+  // reparte una corrección mínima entre todos para poder cerrar.
+  function closeAxis(cardPos, cardNeg){
+    let sum=0, autoIdx=[];
+    edges.forEach(function(ed,i){
+      if(ed.card===cardPos)sum+=ed.len;
+      else if(ed.card===cardNeg)sum-=ed.len;
+      if((ed.card===cardPos||ed.card===cardNeg)&&!ed.isManual)autoIdx.push(i);
+    });
+    if(Math.abs(sum)<0.01)return;
+    if(autoIdx.length>0){
+      const share=sum/autoIdx.length;
+      autoIdx.forEach(function(i){
+        const ed=edges[i];
+        if(ed.card===cardPos)ed.len=Math.max(2,ed.len-share);
+        else ed.len=Math.max(2,ed.len+share);
+      });
+    } else {
+      let total=0;
+      edges.forEach(function(ed){if(ed.card===cardPos||ed.card===cardNeg)total+=ed.len;});
+      if(total>0){
+        edges.forEach(function(ed){
+          if(ed.card===cardPos)ed.len=Math.max(2,ed.len-sum*(ed.len/total));
+          else if(ed.card===cardNeg)ed.len=Math.max(2,ed.len+sum*(ed.len/total));
+        });
+      }
+    }
+  }
+  closeAxis(0,2);
+  closeAxis(1,3);
+
+  // Reconstruir vértices en espacio rotado y devolver al lienzo, recentrado
+  // sobre el mismo centroide de la zona original.
+  let curX=0, curY=0;
+  const rotPts=[{x:0,y:0}];
+  const dirs=[[1,0],[0,1],[-1,0],[0,-1]];
+  edges.forEach(function(ed,i){
+    curX+=dirs[ed.card][0]*ed.len;
+    curY+=dirs[ed.card][1]*ed.len;
+    if(i<n-1)rotPts.push({x:curX,y:curY});
+  });
+
+  const origCx=z.pts.reduce(function(a,p){return a+p.x;},0)/n;
+  const origCy=z.pts.reduce(function(a,p){return a+p.y;},0)/n;
+  const newPtsRaw=rotPts.map(function(p){return {x:p.x*cosB-p.y*sinB,y:p.x*sinB+p.y*cosB};});
+  const newCx=newPtsRaw.reduce(function(a,p){return a+p.x;},0)/n;
+  const newCy=newPtsRaw.reduce(function(a,p){return a+p.y;},0)/n;
+  const offX=origCx-newCx, offY=origCy-newCy;
+
+  saveState();
+  z.pts=newPtsRaw.map(function(p){return {x:p.x+offX,y:p.y+offY};});
+  panelLayouts=panelLayouts.filter(function(l){return l.zoneId!==z.id;});
+  renderPanel();drawAll();
+  // La forma puede quedar más grande (o más chica) que como se dibujó a
+  // mano, ya que ahora respeta las medidas reales exactas. Ajustamos la
+  // vista para que quede completa y centrada en pantalla.
+  const xs3=z.pts.map(function(p){return p.x;}), ys3=z.pts.map(function(p){return p.y;});
+  fitViewToBounds(Math.min.apply(null,xs3),Math.min.apply(null,ys3),Math.max.apply(null,xs3),Math.max.apply(null,ys3),50);
+  drawAll();
+  showStatus('✓ Zona enderezada según las medidas ingresadas');
+}
+
 function delZone(id){
   saveState();
   zones=zones.filter(function(z){return z.id!==id;});
@@ -2335,7 +2672,7 @@ resize();
   <div class="pm-result" id="pm-result">Dibuja una zona primero (botón Zona)</div>
   <div class="mbtns">
     <button onclick="closePanelModal()">Cancelar</button>
-    <button class="pri" onclick="fitPanels()">Calcular y mostrar</button>
+    <button class="pri" id="pm-calc-btn" onclick="fitPanels()">Calcular y mostrar</button>
   </div>
 </div>
 
