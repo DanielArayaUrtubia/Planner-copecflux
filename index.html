@@ -485,10 +485,18 @@ function resize(){
   if(dw===0||dh===0) return;
   const prevW=VW,prevH=VH;
   VW=dw;VH=dh;
+  // Los celulares modernos tienen densidad de píxeles más alta que 1
+  // (2x, 3x). Si el lienzo se dibuja solo a la resolución "lógica" (CSS),
+  // se ve borroso/pixelado. Dibujamos el doble/triple de píxeles reales
+  // y escalamos el contexto, así todo (foto, líneas, texto) sale nítido.
+  const DPR=Math.min(window.devicePixelRatio||1, 3);
   [bgC,drC].forEach(c=>{
-    c.width=dw;c.height=dh;
+    c.width=Math.round(dw*DPR);c.height=Math.round(dh*DPR);
     c.style.width=dw+'px';c.style.height=dh+'px';
     c.style.left='0';c.style.top='0';
+    const cx=c.getContext('2d');
+    cx.setTransform(1,0,0,1,0,0); // evita que la escala se acumule en cada resize
+    cx.scale(DPR,DPR);
   });
   if(typeof resetView==='function')resetView();
   // Reubicar elementos existentes cuando cambia el tamaño del lienzo.
@@ -535,13 +543,13 @@ function resize(){
 }
 
 function drawBg(){
-  bgX.clearRect(0,0,bgC.width,bgC.height);
-  bgX.fillStyle='#f2e8d0';bgX.fillRect(0,0,bgC.width,bgC.height);
+  bgX.clearRect(0,0,VW,VH);
+  bgX.fillStyle='#f2e8d0';bgX.fillRect(0,0,VW,VH);
   bgX.strokeStyle='rgba(100,60,10,0.10)';bgX.lineWidth=0.5;
-  for(let x=0;x<bgC.width;x+=20){bgX.beginPath();bgX.moveTo(x,0);bgX.lineTo(x,bgC.height);bgX.stroke()}
-  for(let y=0;y<bgC.height;y+=20){bgX.beginPath();bgX.moveTo(0,y);bgX.lineTo(bgC.width,y);bgX.stroke()}
+  for(let x=0;x<VW;x+=20){bgX.beginPath();bgX.moveTo(x,0);bgX.lineTo(x,VH);bgX.stroke()}
+  for(let y=0;y<VH;y+=20){bgX.beginPath();bgX.moveTo(0,y);bgX.lineTo(VW,y);bgX.stroke()}
   if(bgImg){
-    const ir=getImgRect(bgC.width,bgC.height,bgImg.width,bgImg.height);
+    const ir=getImgRect(VW,VH,bgImg.width,bgImg.height);
     bgX.drawImage(bgImg,ir.x,ir.y,ir.w,ir.h);
   }
 }
@@ -818,7 +826,7 @@ function renderObstruction(ctx, o, sel, isPrev){
 // DRAW ALL
 // ══════════════════════════════════════════════════════════
 function drawAll(prev){
-  drX.clearRect(0,0,drC.width,drC.height);
+  drX.clearRect(0,0,VW,VH);
   _labelQueue=[];
   lines.forEach(l=>renderLine(drX,l,l.id===selId,false));
   if(prev)renderLine(drX,prev,false,true);
@@ -913,8 +921,8 @@ function pos(e){
   // esta conversión siempre devuelve la coordenada real dentro de la foto,
   // sin importar cuánto zoom haya en este momento.
   return{
-    x:(t.clientX-r.left)/r.width*drC.width,
-    y:(t.clientY-r.top)/r.height*drC.height
+    x:(t.clientX-r.left)/r.width*VW,
+    y:(t.clientY-r.top)/r.height*VH
   };
 }
 
@@ -1829,7 +1837,7 @@ function downloadImg(){
     if(hBtn){hBtn.disabled=false;hBtn.style.opacity='1';}
   }
   function doExport(imgEl){
-    const W=bgC.width,H=bgC.height;
+    const W=VW,H=VH;
     // El lienzo en pantalla puede ser chico (celular). Para no perder calidad,
     // exportamos a una resolución más alta: si hay foto de fondo, usamos su
     // resolución nativa como referencia; si no, un múltiplo fijo alto.
