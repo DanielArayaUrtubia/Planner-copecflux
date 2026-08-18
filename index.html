@@ -590,12 +590,10 @@ function renderLine(ctx,l,sel,isPrev){
 
   // measurement label
   if(!isPrev&&l.pts.length>=2){
-    const m=midPt(l.pts);
-    const offset=18;
-    const mx=m.x,my=m.y-offset;
+    const m=midOnPath(l.pts);
     const sc=computeAutoScale()||scale;
     let label=l.manualLen!=null?fmt(l.manualLen)+' '+unit:(sc?fmt(l.pxLen/sc)+' '+unit:Math.round(l.pxLen)+' px');
-    queueLabel(mx,my-6,label,lineClr,sel?'600':'500');
+    queueLabel(m.x,m.y,label,lineClr,sel?'600':'500',m.angle);
   }
   ctx.restore();
 }
@@ -772,7 +770,7 @@ function renderSlope(ctx, s, sel, isPrev){
   if(!isPrev){
     var perp=ang-Math.PI/2;
     var lx=(x1+x2)/2+Math.cos(perp)*16, ly=(y1+y2)/2+Math.sin(perp)*16;
-    queueLabel(lx,ly-5,label,clr,sel?'600':'500');
+    queueLabel(lx,ly-5,label,clr,sel?'600':'500',ang);
   }
   ctx.restore();
 }
@@ -844,6 +842,27 @@ function drawAll(prev){
 // ══════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════
+function midOnPath(pts){
+  if(pts.length<2)return {x:pts[0].x,y:pts[0].y,angle:0};
+  const total=pxLen(pts);
+  const half=total/2;
+  let acc=0;
+  for(let i=1;i<pts.length;i++){
+    const p0=pts[i-1],p1=pts[i];
+    const segLen=Math.hypot(p1.x-p0.x,p1.y-p0.y);
+    if(acc+segLen>=half||i===pts.length-1){
+      const t=segLen>0?Math.min(1,Math.max(0,(half-acc)/segLen)):0;
+      return {
+        x:p0.x+(p1.x-p0.x)*t,
+        y:p0.y+(p1.y-p0.y)*t,
+        angle:Math.atan2(p1.y-p0.y,p1.x-p0.x)
+      };
+    }
+    acc+=segLen;
+  }
+  const p0=pts[pts.length-2],p1=pts[pts.length-1];
+  return {x:p1.x,y:p1.y,angle:Math.atan2(p1.y-p0.y,p1.x-p0.x)};
+}
 function midPt(pts){let tx=0,ty=0;pts.forEach(p=>{tx+=p.x;ty+=p.y});return{x:tx/pts.length,y:ty/pts.length}}
 function pxLen(pts){let d=0;for(let i=1;i<pts.length;i++){const dx=pts[i].x-pts[i-1].x,dy=pts[i].y-pts[i-1].y;d+=Math.sqrt(dx*dx+dy*dy)}return d}
 function fmt(v){return v<10?v.toFixed(2):v.toFixed(1)}
@@ -853,28 +872,37 @@ function fmt(v){return v<10?v.toFixed(2):v.toFixed(1)}
 // zona, inclinación, componente), se "encolan" y al final de drawAll()
 // se separan las que se superponen antes de dibujarlas.
 let _labelQueue=[];
-function queueLabel(cx,cy,text,color,weight){
-  _labelQueue.push({cx,cy,text,color,weight:weight||'500'});
+function queueLabel(cx,cy,text,color,weight,angle){
+  _labelQueue.push({cx,cy,text,color,weight:weight||'500',angle:angle||0});
 }
 function flushLabelQueue(ctx){
   if(!_labelQueue.length)return;
   ctx.save();
+  const FS=9;
   const boxes=_labelQueue.map(l=>{
-    ctx.font=l.weight+' 11px sans-serif';
+    ctx.font=l.weight+' '+FS+'px sans-serif';
     const tw=ctx.measureText(l.text).width;
-    return {cx:l.cx,cy:l.cy,w:tw+10,h:16,text:l.text,color:l.color,weight:l.weight};
+    const w=tw+7, h=13;
+    // normaliza el ángulo para que el texto nunca quede "cabeza abajo"
+    let a=l.angle||0;
+    while(a>Math.PI/2)a-=Math.PI;
+    while(a<-Math.PI/2)a+=Math.PI;
+    // caja delimitadora tras rotar (para la detección de superposición)
+    const aw=Math.abs(w*Math.cos(a))+Math.abs(h*Math.sin(a));
+    const ah=Math.abs(w*Math.sin(a))+Math.abs(h*Math.cos(a));
+    return {cx:l.cx,cy:l.cy,w,h,aw,ah,text:l.text,color:l.color,weight:l.weight,angle:a};
   });
   for(let pass=0;pass<8;pass++){
     let moved=false;
     for(let i=0;i<boxes.length;i++){
       for(let j=i+1;j<boxes.length;j++){
         const a=boxes[i],b=boxes[j];
-        const ax1=a.cx-a.w/2,ax2=a.cx+a.w/2,ay1=a.cy-a.h/2,ay2=a.cy+a.h/2;
-        const bx1=b.cx-b.w/2,bx2=b.cx+b.w/2,by1=b.cy-b.h/2,by2=b.cy+b.h/2;
+        const ax1=a.cx-a.aw/2,ax2=a.cx+a.aw/2,ay1=a.cy-a.ah/2,ay2=a.cy+a.ah/2;
+        const bx1=b.cx-b.aw/2,bx2=b.cx+b.aw/2,by1=b.cy-b.ah/2,by2=b.cy+b.ah/2;
         if(ax1<bx2&&ax2>bx1&&ay1<by2&&ay2>by1){
-          const needed=(a.h+b.h)/2+3;
+          const needed=(a.ah+b.ah)/2+2;
           const cur=Math.abs(a.cy-b.cy)||0.01;
-          const push=Math.max(needed-cur,4);
+          const push=Math.max(needed-cur,3);
           if(b.cy>=a.cy){b.cy+=push/2;a.cy-=push/2;} else {a.cy+=push/2;b.cy-=push/2;}
           moved=true;
         }
@@ -883,10 +911,15 @@ function flushLabelQueue(ctx){
     if(!moved)break;
   }
   boxes.forEach(l=>{
-    ctx.font=l.weight+' 11px sans-serif';
-    ctx.fillStyle='rgba(242,232,208,0.94)';ctx.fillRect(l.cx-l.w/2,l.cy-l.h/2,l.w,l.h);
-    ctx.strokeStyle=l.color+'88';ctx.lineWidth=0.6;ctx.strokeRect(l.cx-l.w/2,l.cy-l.h/2,l.w,l.h);
-    ctx.fillStyle=l.color;ctx.textBaseline='middle';ctx.fillText(l.text,l.cx-l.w/2+5,l.cy+0.5);
+    ctx.save();
+    ctx.translate(l.cx,l.cy);
+    ctx.rotate(l.angle);
+    ctx.font=l.weight+' '+FS+'px sans-serif';
+    ctx.fillStyle='rgba(242,232,208,0.94)';ctx.fillRect(-l.w/2,-l.h/2,l.w,l.h);
+    ctx.strokeStyle=l.color+'88';ctx.lineWidth=0.5;ctx.strokeRect(-l.w/2,-l.h/2,l.w,l.h);
+    ctx.fillStyle=l.color;ctx.textBaseline='middle';ctx.textAlign='center';
+    ctx.fillText(l.text,0,0.5);
+    ctx.restore();
   });
   ctx.restore();
   _labelQueue=[];
@@ -2051,7 +2084,8 @@ function renderZone(ctx, z, sel, isPrev){
       const toOutX=emx-pcx, toOutY=emy-pcy;
       const sign=(perpX*toOutX+perpY*toOutY)>=0?1:-1;
       const lx=emx+perpX*sign*14, ly=emy+perpY*sign*14;
-      queueLabel(lx,ly,letter+': '+edgeLabel,clr,sel?'600':'500');
+      const edgeAngle=Math.atan2(dy,dx);
+      queueLabel(lx,ly,letter+': '+edgeLabel,clr,sel?'600':'500',edgeAngle);
     }
   }
 
