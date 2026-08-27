@@ -929,6 +929,10 @@ function renderObstruction(ctx, o, sel, isPrev){
 function drawAll(prev){
   drX.clearRect(0,0,VW,VH);
   _labelQueue=[];
+  // Capa de fondo: los gabinetes (abierto/cerrado) van SIEMPRE detrás de
+  // todo lo demás (líneas, zonas, otros componentes/stickers).
+  components.filter(c=>COMP_DEFS[c.type]&&COMP_DEFS[c.type].renderBehind)
+    .forEach(c=>renderComp(drX,c,c.id===selId));
   lines.forEach(l=>renderLine(drX,l,l.id===selId,false));
   if(prev)renderLine(drX,prev,false,true);
   zones.forEach(z=>renderZone(drX,z,z.id===selId,false));
@@ -938,7 +942,9 @@ function drawAll(prev){
   panelLayouts.forEach(l=>renderPanelLayout(drX,l));
   slopes.forEach(s=>renderSlope(drX,s,s.id===selId,false));
   if(prev&&prev._isSlope)renderSlope(drX,prev,false,true);
-  components.forEach(c=>renderComp(drX,c,c.id===selId));
+  // Resto de componentes y stickers: por encima de todas las líneas.
+  components.filter(c=>!(COMP_DEFS[c.type]&&COMP_DEFS[c.type].renderBehind))
+    .forEach(c=>renderComp(drX,c,c.id===selId));
   flushLabelQueue(drX);
 }
 
@@ -1089,7 +1095,7 @@ function pointInPoly(p,pts){
   }
   return inside;
 }
-function hitComp(p){for(let i=components.length-1;i>=0;i--){const c=components[i],w=c.w||60,h=c.h||60;if(Math.abs(p.x-c.x)<w/2&&Math.abs(p.y-c.y)<h/2)return c;}return null}
+function hitComp(p){for(let i=components.length-1;i>=0;i--){const c=components[i],w=c.w||60,h=c.h||60;const pad=10;if(Math.abs(p.x-c.x)<w/2+pad&&Math.abs(p.y-c.y)<h/2+pad)return c;}return null}
 function hitCompResize(p){const c=components.find(c=>c.id===selId);if(!c)return false;const w=c.w||60,h=c.h||60;return Math.hypot(p.x-(c.x+w/2),p.y-(c.y+h/2))<16}
 function hitLinePt(p){const l=lines.find(l=>l.id===selId);if(!l)return -1;for(let i=0;i<l.pts.length;i++){if(Math.hypot(p.x-l.pts[i].x,p.y-l.pts[i].y)<16)return i;}return -1}
 function hitZonePt(p){const z=zones.find(function(z){return z.id===selId;});if(!z)return -1;for(let i=0;i<z.pts.length;i++){if(Math.hypot(p.x-z.pts[i].x,p.y-z.pts[i].y)<16)return i;}return -1}
@@ -1828,8 +1834,22 @@ function renderPanel(){
     d.appendChild(div);
     const meta=document.createElement('div');meta.className='line-meta';meta.style.color=def.color;meta.textContent=def.label;d.appendChild(meta);
     const mrow=document.createElement('div');mrow.className='mrow';
-    mrow.innerHTML='<button onclick="openCompModal('+c.id+');event.stopPropagation()"><i class="ti ti-pencil" style="font-size:10px"></i> Editar</button><span style="font-size:9.5px;color:var(--text3);margin-left:4px">↘ arrastra esquina</span>';
+    mrow.innerHTML='<button onclick="openCompModal('+c.id+');event.stopPropagation()"><i class="ti ti-pencil" style="font-size:10px"></i> Editar</button>';
     d.appendChild(mrow);
+    // Control deslizante de tamaño (como volumen): mueve ambos lados a la
+    // vez, más fácil e intuitivo que arrastrar la esquina para achicar o
+    // agrandar el sticker/componente.
+    const sizeRow=document.createElement('div');
+    sizeRow.className='mrow';
+    sizeRow.style.cssText='gap:6px;align-items:center';
+    sizeRow.onclick=ev=>ev.stopPropagation();
+    const curSize=Math.max(c.w||60,c.h||60);
+    sizeRow.innerHTML='<i class="ti ti-minus" style="font-size:11px;color:var(--text3);flex-shrink:0"></i>'
+      +'<input type="range" min="20" max="320" value="'+curSize+'" style="flex:1" '
+      +'oninput="resizeCompBySlider('+c.id+',this.value)" '
+      +'onchange="saveState()">'
+      +'<i class="ti ti-plus" style="font-size:11px;color:var(--text3);flex-shrink:0"></i>';
+    d.appendChild(sizeRow);
     list.appendChild(d);
   });
 
@@ -1990,6 +2010,17 @@ function delSlope(id){saveState();slopes=slopes.filter(function(s){return s.id!=
 function setManualDeg(e,id){e.stopPropagation();var v=parseFloat(document.getElementById('sdeg-'+id).value);if(!isNaN(v)&&v>=0&&v<=90){saveState();slopes.find(function(x){return x.id===id;}).manualDeg=v;renderPanel();drawAll();}}
 function resetManualDeg(e,id){e.stopPropagation();slopes.find(function(x){return x.id===id;}).manualDeg=null;document.getElementById('sdeg-'+id).value='';renderPanel();drawAll();}
 function delLine(id){saveState();lines=lines.filter(l=>l.id!==id);if(selId===id)selId=null;renderPanel();drawAll()}
+function resizeCompBySlider(id,val){
+  const c=components.find(function(x){return x.id===id;});
+  if(!c)return;
+  const newMax=parseFloat(val);
+  const curW=c.w||60, curH=c.h||60;
+  const curMax=Math.max(curW,curH)||1;
+  const ratio=newMax/curMax;
+  c.w=Math.max(12,curW*ratio);
+  c.h=Math.max(12,curH*ratio);
+  drawAll();
+}
 function delComp(id){saveState();components=components.filter(c=>c.id!==id);if(selId===id)selId=null;renderPanel();drawAll()}
 function setManual(e,id){
   e.stopPropagation();const v=parseFloat(document.getElementById('inp-'+id).value);
