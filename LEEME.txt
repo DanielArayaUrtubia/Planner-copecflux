@@ -1,0 +1,38 @@
+CÓMO COMPLETAR assetlinks.json
+================================
+
+Este archivo ya viene con la estructura correcta, solo le faltan 2 datos
+tuyos que vienen en el ZIP que te generó PWABuilder junto al APK
+(el mismo que tiene signing.keystore y signing-key-info.txt).
+
+PWABuilder también generó SU PROPIO assetlinks.json con esos datos ya
+completos — lo más fácil es abrir ESE archivo (el de PWABuilder) y
+copiar su contenido completo, reemplazando el de esta plantilla.
+
+Si prefieres completar esta plantilla a mano, necesitas 2 datos:
+
+1) "package_name"
+   Está en signing-key-info.txt o en el nombre del paquete que
+   configuraste en PWABuilder (ejemplo: com.copecflux.plans)
+
+2) "sha256_cert_fingerprints"
+   También está en signing-key-info.txt, o lo puedes sacar así desde
+   una terminal (necesitas tener Java/keytool instalado):
+
+   keytool -list -v -keystore signing.keystore
+
+   Te pedirá la contraseña del keystore (está en signing-key-info.txt).
+   Busca la línea que dice "SHA256:" y copia esos pares de dos letras
+   separados por ":" — va completo, tal cual aparece.
+
+DÓNDE VA ESTE ARCHIVO EN GITHUB
+================================
+Debe quedar en la raíz de tu repo, dentro de una carpeta llamada
+exactamente ".well-known" (con el punto adelante), de forma que quede
+accesible en:
+
+https://danielarayaurtubia.github.io/Planner-copecflux/.well-known/assetlinks.json
+
+Si al abrir esa URL ves el JSON (no un error 404), quedó bien puesto.
+Después de eso, genera un APK NUEVO en PWABuilder para que la barra
+con la URL desaparezca al abrir la app.

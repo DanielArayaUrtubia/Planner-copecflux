@@ -663,10 +663,25 @@ function renderLine(ctx,l,sel,isPrev){
   l.pts.forEach((p,i)=>{
     const isEditPt=tool==='edit'&&sel;
     const isEnd=i===0||i===l.pts.length-1;
-    ctx.beginPath();ctx.arc(p.x,p.y,isEditPt?7:(sel?5:3.5),0,Math.PI*2);
-    ctx.fillStyle=isEnd?clr:'#ddd0ac';
-    ctx.fill();ctx.strokeStyle=clr;ctx.lineWidth=isEditPt?2:1.5;ctx.stroke();
-    if(isEditPt){ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();}
+    if(isEditPt){
+      ctx.beginPath();ctx.arc(p.x,p.y,7,0,Math.PI*2);
+      ctx.fillStyle=isEnd?clr:'#ddd0ac';
+      ctx.fill();ctx.strokeStyle=clr;ctx.lineWidth=2;ctx.stroke();
+      ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
+    } else if(!isPrev){
+      // Marca de cota tipo CAD: una pequeña línea perpendicular en cada
+      // extremo, en vez de un punto sólido — se ve más a plano técnico
+      // y estorba mucho menos sobre la foto.
+      const nb=i===0?l.pts[1]:l.pts[l.pts.length-2];
+      const dx=p.x-nb.x, dy=p.y-nb.y;
+      const len=Math.hypot(dx,dy)||1;
+      const px2=-dy/len, py2=dx/len;
+      const tlen=sel?7:5;
+      ctx.beginPath();
+      ctx.moveTo(p.x-px2*tlen,p.y-py2*tlen);
+      ctx.lineTo(p.x+px2*tlen,p.y+py2*tlen);
+      ctx.strokeStyle=clr;ctx.lineWidth=sel?2:1.5;ctx.stroke();
+    }
   });
 
   // symbol along line middle
@@ -1043,9 +1058,12 @@ function flushLabelQueue(ctx){
     ctx.translate(l.cx,l.cy);
     ctx.rotate(l.angle);
     ctx.font=l.weight+' '+FS+'px sans-serif';
-    ctx.fillStyle='rgba(242,232,208,0.94)';ctx.fillRect(-l.w/2,-l.h/2,l.w,l.h);
-    ctx.strokeStyle=l.color+'88';ctx.lineWidth=0.5;ctx.strokeRect(-l.w/2,-l.h/2,l.w,l.h);
     ctx.fillStyle=l.color;ctx.textBaseline='middle';ctx.textAlign='center';
+    // Estilo CAD: sin caja de fondo, solo el texto con un halo blanco
+    // detrás (para que se lea sobre cualquier parte de la foto) — mucho
+    // más limpio que una etiqueta sólida tapando la imagen.
+    ctx.lineWidth=2.6;ctx.strokeStyle='rgba(255,255,255,0.95)';ctx.lineJoin='round';
+    ctx.strokeText(l.text,0,0.5);
     ctx.fillText(l.text,0,0.5);
     ctx.restore();
   });
